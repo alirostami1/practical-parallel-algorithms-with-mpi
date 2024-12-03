@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) NHR@FAU, University Erlangen-Nuremberg.
+ * All rights reserved. This file is part of nusif-solver.
+ * Use of this source code is governed by a MIT style
+ * license that can be found in the LICENSE file.
+ */
 #include "math.h"
 #include "stdio.h"
 #include "stdlib.h"
@@ -9,6 +15,70 @@
 #define PI        3.14159265358979323846
 #define P(i, j)   p[(j) * (imax + 2) + (i)]
 #define RHS(i, j) rhs[(j) * (imax + 2) + (i)]
+
+// static int sizeOfRank(int rank, int size, int N)
+// {
+//     return <EXTEND>;
+// }
+
+// static void exchange(Solver* solver)
+// {
+//     MPI_Request requests[4] = { MPI_REQUEST_NULL,
+//         MPI_REQUEST_NULL,
+//         MPI_REQUEST_NULL,
+//         MPI_REQUEST_NULL };
+//
+//     /* exchange ghost cells with top neighbor */
+//     if (solver->rank + 1 < solver->size) {
+//         int top     = <EXTEND>;
+//         double* src = <EXTEND>;
+//         double* dst = <EXTEND>;
+//
+//         MPI_Isend(<EXTEND>);
+//         MPI_Irecv(<EXTEND>);
+//     }
+//
+//     /* exchange ghost cells with bottom neighbor */
+//     if (solver->rank > 0) {
+//         int bottom  = <EXTEND>;
+//         double* src = <EXTEND>;
+//         double* dst = <EXTEND>;
+//
+//         MPI_Isend(<EXTEND>);
+//         MPI_Irecv(<EXTEND>);
+//     }
+//
+//     MPI_Waitall(4, requests, MPI_STATUSES_IGNORE);
+// }
+
+// void getResult(Solver* solver)
+// {
+//     double* p = NULL;
+//     int *rcvCounts, *displs;
+//
+//     if (solver->rank == 0) {
+//         p = allocate(64, (solver->imax + 2) * (solver->jmax + 2) * sizeof(double));
+//         rcvCounts    = <EXTEND>;
+//         displs       = <EXTEND>;
+//         rcvCounts[0] = <EXTEND>;
+//         displs[0]    = <EXTEND>;
+//         int cursor   = rcvCounts[0];
+//
+//         for (int i = 1; i < solver->size; i++) {
+//             rcvCounts[i] = <EXTEND>
+//             displs[i]    = cursor;
+//             cursor += rcvCounts[i];
+//         }
+//     }
+//
+//     int cnt            = <EXTEND>;
+//     double* sendbuffer = <EXTEND>;
+//     MPI_Gatherv(<EXTEND>);
+//     if (solver->rank == 0) {
+//         writeResult(solver, p, "p.dat");
+//         free(p);
+//     }
+// }
 
 void initSolver(Solver* solver, Parameter* params, int problem)
 {
@@ -31,6 +101,7 @@ void initSolver(Solver* solver, Parameter* params, int problem)
     double* p   = solver->p;
     double* rhs = solver->rhs;
 
+    // adapt for MPI case
     for (int j = 0; j < jmax + 2; j++) {
         for (int i = 0; i < imax + 2; i++) {
             P(i, j) = sin(2.0 * PI * i * dx * 2.0) + sin(2.0 * PI * j * dy * 2.0);
@@ -224,8 +295,6 @@ void solveRBA(Solver* solver)
         it++;
     }
 
-    // printf("Final omega: %f\n", omega);
-    // printf("Solver took %d iterations to reach %f\n", it, sqrt(res));
     printf("%d ", it);
 }
 
