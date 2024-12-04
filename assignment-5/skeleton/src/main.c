@@ -16,61 +16,65 @@
 #include "solver.h"
 #include "timing.h"
 
-int main(int argc, char** argv)
-{
-    int rank = 0;
+int main(int argc, char **argv) {
+#ifdef DEBUG
+  printf("DEBUG: %s\n", __FILE__);
+#endif
+  int rank = 0;
 
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    double start, end;
-    Parameter params;
-    Solver solver;
+  double start, end;
+  Parameter params;
+  Solver solver;
 
-    initParameter(&params);
+  initParameter(&params);
 
-    if (argc != 2) {
-        printf("Usage: %s <configFile>\n", argv[0]);
-        exit(EXIT_SUCCESS);
+  if (argc != 2) {
+    printf("Usage: %s <configFile>\n", argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
+  readParameter(&params, argv[1]);
+  if (rank == 0) {
+    printParameter(&params);
+  }
+
+  fflush(stdout);
+  initSolver(&solver, &params);
+
+  double tau = solver.tau;
+  double te = solver.te;
+  double t = 0.0;
+
+  start = getTimeStamp();
+  while (t <= te) {
+    if (tau > 0.0) {
+      computeTimestep(&solver);
     }
 
-    readParameter(&params, argv[1]);
-    if (rank == 0) {
-        printParameter(&params);
-    }
-    initSolver(&solver, &params);
-
-    double tau = solver.tau;
-    double te  = solver.te;
-    double t   = 0.0;
-
-    start = getTimeStamp();
-    while (t <= te) {
-        if (tau > 0.0) {
-            computeTimestep(&solver);
-        }
-
-        setBoundaryConditions(&solver);
-        setSpecialBoundaryCondition(&solver);
-        computeFG(&solver);
-        computeRHS(&solver);
-        solve(&solver);
-        adaptUV(&solver);
-        t += solver.dt;
+    setBoundaryConditions(&solver);
+    setSpecialBoundaryCondition(&solver);
+    computeFG(&solver);
+    computeRHS(&solver);
+    solve(&solver);
+    adaptUV(&solver);
+    t += solver.dt;
 
 #ifdef VERBOSE
-        if (rank == 0) {
-            printf("TIME %f , TIMESTEP %f\n", t, solver.dt);
-        }
-#endif
-    }
-    end = getTimeStamp();
-    stopProgress();
     if (rank == 0) {
-        printf("Solution took %.2fs\n", end - start);
+      printf("TIME %f , TIMESTEP %f\n", t, solver.dt);
     }
-    collectResult(&solver);
+#endif
+  }
+  end = getTimeStamp();
+  stopProgress();
+  if (rank == 0) {
+    printf("Solution took %.2fs\n", end - start);
+  }
+  collectResult(&solver);
 
-    MPI_Finalize();
-    return EXIT_SUCCESS;
+  MPI_Finalize();
+  return EXIT_SUCCESS;
 }

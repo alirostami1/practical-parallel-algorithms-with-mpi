@@ -142,10 +142,26 @@ void exchange(Solver *solver, double *grid) {
   /* datatype to send. You have initialized them during   */
   /* initSolver() call and you can use them directly here.*/
   /* Refer to lecture slides for more information.        */
+#ifdef DEBUG
+  double *u = grid;
+  int imaxLocal = solver->imaxLocal;
+  // Print ghost cells before exchange
+  for (int i = 0; i < solver->imaxLocal + 2; i++) {
+    printf("Rank %d: Before exchange, ghost cell U[%d][0] = %f\n", solver->rank,
+           i, U(i, 0));
+  }
+#endif
   int counts[NDIRS] = {1, 1, 1, 1};
   MPI_Neighbor_alltoallw(grid, counts, solver->sdispls, solver->bufferTypes,
                          grid, counts, solver->rdispls, solver->bufferTypes,
                          solver->comm);
+#ifdef DEBUG
+  // Print ghost cells after exchange
+  for (int i = 0; i < solver->imaxLocal + 2; i++) {
+    printf("Rank %d: After exchange, ghost cell U[%d][0] = %f\n", solver->rank,
+           i, U(i, 0));
+  }
+#endif
 }
 
 void shift(Solver *solver) {
@@ -295,8 +311,11 @@ static void assembleResult(Solver *solver, double *src, double *dst) {
       MPI_Type_commit(&domainType);
 
       /* Recv the data using domainType subarray from rest of the ranks */
-      MPI_Irecv(dst, 1, domainType, i, 0, MPI_COMM_WORLD, &requests[i]);
+      MPI_Irecv(dst, 1, domainType, i, 0, MPI_COMM_WORLD, &requests[i + 1]);
       MPI_Type_free(&domainType);
+#ifdef DEBUG
+      printf("Rank %d: after Irecv\n", solver->rank);
+#endif
     }
   }
 
@@ -309,14 +328,26 @@ void collectResult(Solver *solver) {
   double *Pall = allocate(64, bytesize);
   double *Uall = allocate(64, bytesize);
   double *Vall = allocate(64, bytesize);
+#ifdef DEBUG
+  printf("rank = %d, after allocation\n", solver->rank);
+#endif
   /* collect P */
   assembleResult(solver, solver->p, Pall);
+#ifdef DEBUG
+  printf("rank = %d, after assembleResult p\n", solver->rank);
+#endif
 
   /* collect U */
   assembleResult(solver, solver->u, Uall);
+#ifdef DEBUG
+  printf("rank = %d, after assembleResult u\n", solver->rank);
+#endif
 
   /* collect V */
   assembleResult(solver, solver->v, Vall);
+#ifdef DEBUG
+  printf("rank = %d, after assembleResult v\n", solver->rank);
+#endif
 
   if (solver->rank == 0) {
     writeResult(solver, Pall, Uall, Vall);
@@ -403,7 +434,7 @@ void initSolver(Solver *solver, Parameter *params) {
   /* Use virtual topologies to get dimension and coordinates of the rank */
   int dims[NDIMS] = {0, 0};
   int periods[NDIMS] = {0, 0};
-  int coords[NDIMS];
+  int coords[NDIMS] = {0, 0};
 
   /* Retrieves best possible #ranks in X and Y dimensions from the given
    * communicator size. */
@@ -412,13 +443,13 @@ void initSolver(Solver *solver, Parameter *params) {
   /* Store in dims array */
   /* https://rookiehpc.org/mpi/docs/mpi_dims_create/index.html */
   MPI_Dims_create(solver->size, NDIMS, dims); // Auto-calculate grid dimensions
-  memcpy(&solver->dims, &dims, NDIMS);
+  memcpy(&solver->dims, &dims, NDIMS * sizeof(int));
 
   /* Create a new communicator based on the dimensions             */
   /* Store the new communicator in &solver->comm                   */
   /* Use NDIMS to specify dimension size                           */
   /* https://rookiehpc.org/mpi/docs/mpi_cart_create/index.html     */
-  MPI_Cart_create(MPI_COMM_WORLD, NDIMS, dims, periods, 1, &(solver->comm));
+  MPI_Cart_create(MPI_COMM_WORLD, NDIMS, dims, periods, 1, &solver->comm);
 
   /* Use newly created communicator solver->comm                   */
   /* For left and right neighbors                                  */
@@ -435,8 +466,8 @@ void initSolver(Solver *solver, Parameter *params) {
 
   /* Retrieve the cartesion topology of the rank in solver->coords */
   /* https://rookiehpc.org/mpi/docs/mpi_cart_get/index.html        */
-  MPI_Cart_coords(solver->comm, solver->rank, NDIMS, coords);
-  memcpy(&solver->coords, &coords, NDIMS);
+  MPI_Cart_get(solver->comm, NDIMS, dims, periods, coords);
+  memcpy(&solver->coords, &coords, NDIMS * sizeof(int));
 
   solver->imaxLocal = sizeOfRank(solver->coords[IDIM], dims[IDIM], imax);
   solver->jmaxLocal = sizeOfRank(solver->coords[JDIM], dims[JDIM], jmax);
@@ -446,6 +477,11 @@ void initSolver(Solver *solver, Parameter *params) {
   size_t bytesize = (imaxLocal + 2) * (jmaxLocal + 2) * sizeof(double);
 
   MPI_Datatype row_type, col_type;
+
+#ifdef DEBUG
+  printf("Rank %d: imaxLocal %d, jmaxLocal %d, dims[IDIM] %d, dims[JDIM] %d\n",
+         solver->rank, imaxLocal, jmaxLocal, dims[IDIM], dims[JDIM]);
+#endif
 
   // Contiguous row type for horizontal ghost layers
   MPI_Type_contiguous(solver->imaxLocal, MPI_DOUBLE, &row_type);
@@ -479,19 +515,36 @@ void initSolver(Solver *solver, Parameter *params) {
   solver->g = allocate(64, bytesize);
 
   /* TODO adapt to local size imaxLocal & jmaxLocal */
-  for (int i = 0; i < (imax + 2) * (jmax + 2); i++) {
-    solver->u[i] = params->u_init;
-    solver->v[i] = params->v_init;
-    solver->p[i] = params->p_init;
-    solver->rhs[i] = 0.0;
-    solver->f[i] = 0.0;
-    solver->g[i] = 0.0;
+  for (int j = 0; j < jmaxLocal + 2; j++) {
+    for (int i = 0; i < imaxLocal + 2; i++) {
+      int idx = j * (imaxLocal + 2) + i;
+      solver->u[idx] = params->u_init;
+      solver->v[idx] = params->v_init;
+      solver->p[idx] = params->p_init;
+      solver->rhs[idx] = 0.0;
+      solver->f[idx] = 0.0;
+      solver->g[idx] = 0.0;
+    }
   }
+
+#ifdef DEBUG
+  double *u = solver->u;
+  double *v = solver->v;
+  double *p = solver->p;
+  for (int j = 0; j < solver->jmaxLocal + 2; j++) {
+    for (int i = 0; i < solver->imaxLocal + 2; i++) {
+      printf("Rank %d: u[%d][%d] = %f\n", solver->rank, i, j, U(i, j));
+      printf("Rank %d: v[%d][%d] = %f\n", solver->rank, i, j, V(i, j));
+      printf("Rank %d: p[%d][%d] = %f\n", solver->rank, i, j, P(i, j));
+    }
+  }
+#endif
 
   double dx = solver->dx;
   double dy = solver->dy;
   double invSqrSum = 1.0 / (dx * dx) + 1.0 / (dy * dy);
   solver->dtBound = 0.5 * solver->re * 1.0 / invSqrSum;
+
 #ifdef VERBOSE
   printConfig(solver);
 #endif
@@ -597,12 +650,7 @@ void solve(Solver *solver) {
     double globalRes = 0.0;
     MPI_Allreduce(&res, &globalRes, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
-    res = res / (double)(imax * jmax);
-#ifdef DEBUG
-    if (solver->rank == 0) {
-      printf("%d Residuum: %e\n", it, res);
-    }
-#endif
+    res = globalRes / (double)(imax * jmax);
     it++;
   }
 
@@ -649,7 +697,7 @@ void normalizePressure(Solver *solver) {
   MPI_Allreduce(&avgP, &globalSum, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
   /* do not adapt to local size imaxLocal & jmaxLocal */
-  avgP = globalSum / ((solver->imax + 2) * (solver->jmax + 2));
+  avgP = globalSum / (solver->imax * solver->jmax);
 
   for (int i = 0; i < size; i++) {
     p[i] = p[i] - avgP;
@@ -854,6 +902,12 @@ void computeFG(Solver *solver) {
   exchange(solver, u);
   exchange(solver, v);
 
+#ifdef DEBUG
+  printf("Rank %d: imaxLocal %d, jmaxLocal %d, dims[IDIM] %d, dims[JDIM] %d\n",
+         solver->rank, imaxLocal, jmaxLocal, solver->dims[IDIM],
+         solver->dims[JDIM]);
+#endif
+
   for (int j = 1; j <= jmaxLocal; j++) {
     for (int i = 1; i <= imaxLocal; i++) {
       du2dx = inverseDx * 0.25 *
@@ -977,6 +1031,10 @@ void writeResult(Solver *solver, double *Pall, double *Uall, double *Vall) {
     exit(EXIT_FAILURE);
   }
 
+#ifdef DEBUG
+  printf("WRITING PRESSURE DATA\n");
+#endif
+
   for (int j = 1; j < jmax + 1; j++) {
     y = (double)(j - 0.5) * dy;
     for (int i = 1; i < imax + 1; i++) {
@@ -994,6 +1052,10 @@ void writeResult(Solver *solver, double *Pall, double *Uall, double *Vall) {
     printf("Error!\n");
     exit(EXIT_FAILURE);
   }
+
+#ifdef DEBUG
+  printf("WRITING VELOCITY DATA\n");
+#endif
 
   for (int j = 1; j < jmax + 1; j++) {
     y = dy * (j - 0.5);
